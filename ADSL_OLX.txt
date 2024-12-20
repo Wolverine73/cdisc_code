@@ -1,0 +1,626 @@
+﻿/*~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~==~=~=~=~=~=~=~=~=~=~=~=~=~=~=~==~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+  Program :  ADSL.sas
+  Location:  
+  Study:     PSTM
+  
+  Purpose :  Create ADSL for PSTM
+ 
+
+  Inputs:          Macros
+
+                   Data   
+				   
+
+  Outputs:        
+
+
+  Caution:   
+
+
+  Revision                                        
+  History:           Version    Date            Author                  Description
+                     -------    ---------       -------------------     ----------------------------------------------
+                      Draft     22APR2014       Julia Yang              
+º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø¤º°`°º¤ø,¸¸,ø*/
+
+OPTIONS NODATE NONUMBER NOTES;
+OPTIONS MAUTOLOCDISPLAY MLOGIC MLOGICNEST  SYMBOLGEN MPRINT MPRINTNEST MCOMPILENOTE=ALL MINDELIMITER=',' MRECALL SERROR MERROR mstored; 
+OPTIONS DATASTMTCHK=ALLKEYWORDS SPOOL MSGLEVEL=I SOURCE SOURCE2 MERGENOBY=WARN ;
+proc printto;run;
+
+
+
+/*%MimportSpecs(inpathfilename=%bquote(Z:\PSTM\Documents\ADaM\adsl.xlsx), tabname=ADSL);*/
+/**/
+/*%MCreateShell(mdataset=specslib.adsl);*/
+/**/
+%MdomainVarlist(domain=adsl);
+/*keep keep &adslvarlist.;*/
+
+
+/***********************************************************************************************************
+Step 1. OLX condition assignment
+************************************************************************************************************/
+data ca;
+set specslib.adslshell(where=(astudyid^=' ')) srcolx.RD_CONDITION_ASSIGNMENT (where=(armname= 'Pain_Stim_Arm_5') drop=siteid sitename);
+
+	ASTUDYID='PSTM';
+	STUDYID='OLX.AVAIL.' || "PSTM";
+	SRC_USUBJID='OLX.AVAIL.' || "PSTM" || '.' || SUBJECTNUMBERSTR;
+	USUBJID	   ='OLX.AVAIL.' || "PSTM" || '.' || SUBJECTNUMBERSTR;
+	SUBJID=SUBJECTNUMBERSTR;
+	SITEID=put(SITE_NUMBER, 8.);
+	keep ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr;
+run;
+
+
+/***********************************************************************************************************
+Step 2. OLX Consent
+************************************************************************************************************/
+/*get consent date*/
+Data consent;
+set specslib.adslshell(where=(astudyid^=' ')) Srcolx.RD_ELIGIBILITY(keep=ARMNAME DSSDAT_DTR SUBJECTNUMBERSTR  IEPROD SITE_NUMBER
+	where=(armname= 'Pain_Stim_Arm_5'));
+	ASTUDYID='PSTM';
+	STUDYID='OLX.AVAIL.' || "PSTM";
+	SRC_USUBJID='OLX.AVAIL.' || "PSTM" || '.' || SUBJECTNUMBERSTR;
+	USUBJID='OLX.AVAIL.' || "PSTM" || '.' || SUBJECTNUMBERSTR;
+	SUBJID=SUBJECTNUMBERSTR;
+	SITEID=put(SITE_NUMBER, 8.);
+
+	keep DSSDAT_DTR ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr;
+run;
+
+%MDTR2DTC_DT_ymd(StudyStartData=,StudyStartdate=,
+            InputData=consent, outputdata=consent2,InputDTR=DSSDAT_DTR,OutputDAT=X_RFICDAT,OutputDTC=RFICDTC,OutputDT=X_RFICDT,FLGNAME=RFICDTF);
+
+
+/***********************************************************************************************************
+Step 3.  Study start date, earliest of implants
+************************************************************************************************************/
+%macro sorting(dataset = ,impl_dt=, devtyp=, delrecord = );
+     %let dsid=%sysfunc(open(srcolx.&dataset.,i));
+     %let date_=%sysfunc(varnum(&dsid,&impl_dt.));
+     %let rc=%sysfunc(fetch(&dsid));
+     %let type=%sysfunc(vartype (&dsid,&date_));
+
+     data &dataset.;
+          set specslib.adslshell(where=(astudyid^=' '))
+              srcolx.&dataset.(where=(upcase(&delrecord.) ne "Y" and armname= 'Pain_Stim_Arm_5') drop=siteid sitename);
+          format &devtyp._impldate yymmdd10.;
+			ASTUDYID='PSTM';
+			STUDYID='OLX.AVAIL.' || "PSTM";
+			SRC_USUBJID='OLX.AVAIL.' || "PSTM" || '.' || SUBJECTNUMBERSTR;
+			USUBJID='OLX.AVAIL.' || "PSTM" || '.' || SUBJECTNUMBERSTR;
+			SUBJID=SUBJECTNUMBERSTR;
+			SITEID=put(SITE_NUMBER, 8.);
+          %if &type = C %then 
+               %do;
+                    &devtyp._date = input(scan(&impl_dt.,-1,'-'), best.);
+                    &devtyp._month = input(scan(&impl_dt.,2,'-'), best.);
+                    &devtyp._year = input(scan(&impl_dt.,1,'-'), best.);
+                    if &devtyp._month ne . and &devtyp._date ne . and &devtyp._year ne . then  
+                         &devtyp._impldate = mdy(&devtyp._month,&devtyp._date,&devtyp._year);
+                    else 
+                         &devtyp._impldate = .;
+               %end;
+          %else %if &type = N %then 
+               %do;
+                    &devtyp._impldate = datepart(&impl_dt.);
+                    &devtyp._date = input(scan(STRIP(PUT(&devtyp._impldate,YYMMDD10.)),-1,'-'), best.);
+                    &devtyp._month = input(scan(STRIP(PUT(&devtyp._impldate,YYMMDD10.)),2,'-'), best.);
+                    &devtyp._year = input(scan(STRIP(PUT(&devtyp._impldate,YYMMDD10.)),1,'-'), best.);
+               %end;
+     run;
+
+     %if &type = C %then 
+          %do;
+               proc sort data=&dataset. out=&dataset.1; by SUBJECTNUMBERSTR &devtyp._impldate FORMDATAID; run;
+          %end;
+          %else %if &type = N %then 
+          %do;
+               proc sort data=&dataset. out=&dataset.1; by SUBJECTNUMBERSTR &impl_dt. FORMDATAID; run;
+          %end;
+
+     %let rc=%sysfunc(close(&dsid));
+     /*%if &devtyp. = LD %then %let manf = PRLDMNF_DBS; %else %let manf = ;*/
+     data &dataset.2 &dataset._&devtyp.;     
+          set &dataset.1;
+          by SUBJECTNUMBERSTR; 
+          if first.SUBJECTNUMBERSTR = 1 AND last.SUBJECTNUMBERSTR = 1 and &devtyp._impldate = . then output &dataset._&devtyp.;
+          else if &devtyp._month ne . and &devtyp._date ne . and &devtyp._year ne . then  output &dataset.2;
+     run;
+
+     data &dataset.3 ;   
+          set &dataset.2;
+          by SUBJECTNUMBERSTR;
+          if first.SUBJECTNUMBERSTR;
+     run;
+
+     data &dataset.4 ;   
+          set &dataset.3
+              &dataset._&devtyp.(drop= FORMDATAID);
+			keep SUBJECTNUMBERSTR &impl_dt. &devtyp._impldate FORMDATAID  ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr ;
+		          rename FORMDATAID=FORMDATAID_&devtyp.; 
+     run;
+
+     proc sort data=&dataset.4 out=&dataset.4; 
+          by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr &devtyp._impldate; 
+     run;
+%mend sorting;
+
+%sorting(dataset = Rd_procedure_PSTM, 	impl_dt=PRSTMDAT_PSTM_DTR, 	devtyp=ST,	 delrecord= PRDEL_PSTM_C	);
+%sorting(dataset = Rd_repeat1_pr_PSTM, 	impl_dt=PRLDIMPDAT_PSTM_DTR, devtyp=LD,	 delrecord= PRDELR1_PSTM_C	);
+%sorting(dataset = Rd_repeat2_pr_PSTM, 	impl_dt=PREXTDT_PSTM_DTR,	 devtyp=EX,  delrecord= PRDEL2_PSTM_C	);
+/*%sorting(dataset = Rd_repeat3_pr_PSTM, 	impl_dt=FORMFIRSTDATE, 		devtyp=AD, 	 delrecord= PRDEL3_PSTM_C	); Julia Comment: SDTM did this, I wonder whether this is truly what we want to do*/
+
+%macro mindateval(compval=);
+     if &compval._impldate ne . and earliest_dt ne . then 
+          do;
+               if &compval._impldate LT earliest_dt then 
+                    do;
+                         earliest_dt = &compval._impldate; 
+                         FORMDATAID = FORMDATAID_&compval.; 
+                    end;
+               else 
+                    do; 
+                         earliest_dt = earliest_dt; 
+                         FORMDATAID = FORMDATAID; 
+                    end;
+          end;
+     else if &compval._impldate ne . and earliest_dt eq . then 
+          do;
+               earliest_dt = &compval._impldate; 
+               FORMDATAID = FORMDATAID_&compval.; 
+          end;
+     else 
+          do; 
+               earliest_dt = earliest_dt; 
+               FORMDATAID = FORMDATAID; 
+          end;
+%mend mindateval;
+
+data imp_PSTM;
+     merge Rd_procedure_PSTM4 (in = a)
+           Rd_repeat1_pr_PSTM4
+           Rd_repeat2_pr_PSTM4
+/*           Rd_repeat3_pr_PSTM4*/
+;
+     by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr; 
+
+     /*keep SRC_USUBJID LD_impldate FORMDATAID_LD ST_impldate FORMDATAID_ST EX_impldate FORMDATAID_EX AD_impldate FORMDATAID_AD;*/
+     earliest_dt = ST_impldate; 
+     FORMDATAID = FORMDATAID_ST;
+     %mindateval(compval=LD);
+     %mindateval(compval=EX);
+/*     %mindateval(compval=AD);*/
+     if earliest_dt ne . then
+          first_impldt = put(earliest_dt, yymmdd10.);
+     else 
+          first_impldt = '';
+     if FORMDATAID ne . then
+          X_FORMID_XST=left(trim(PUT(FORMDATAID,best.)));
+     else 
+          X_FORMID_XST= "";
+
+IF subjectnumberstr^=' ';
+run;
+
+%MDTR2DTC_DT_YMD(StudyStartData=,StudyStartdate=,
+             InputData=imp_PSTM, outputdata=imp_PSTM2,InputDTR=first_impldt,
+             OutputDAT=X_RFXSTDAT, OutputDTC=RFXSTDTC, OutputDT=X_RFXSTDT,FLGNAME=TRTSDTF);
+
+data dm_implant;
+     set  specslib.adslshell(where=(ASTUDYID^=' '))  
+          imp_PSTM2;
+     RFSTDTC = RFXSTDTC;
+     X_RFSTDT = X_RFXSTDT;
+     X_RFSTDAT = X_RFXSTDAT;
+     X_FORMID_ST=X_FORMID_XST;
+	keep  ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr X_RFXSTDAT X_RFSTDT X_RFXSTDT RFXSTDTC TRTSDTF;
+run;
+
+%Mdupkeyout_seq(inData=dm_implant,outdata=dm_implant2,dupout=dupout,sortbykeys=STUDYID SRC_USUBJID,seqvar=) ;
+
+data StudyStartdate;
+     set specslib.adslshell(where=(SRC_USUBJID^=' ')) 
+         dm_implant2;
+keep  X_RFSTDT STUDYID SRC_USUBJID subjectnumberstr;
+run;
+
+/***********************************************************************************************************
+Step 4. demographics 
+************************************************************************************************************/
+data dm1;
+     set specslib.adslshell(where=(astudyid^=' ')) 
+		Srcolx.Rd_demographics(rename=(age=age_c siteid=siteid_n SEX=SEX_R ETHNIC=ETHNIC_r)
+                                 KEEP=ARMNAME SUBJECTNUMBERSTR AGE SITEID  
+                                 SITE_NUMBER 
+                                 AGE VISITID VISITORDER
+                                 BRTHDAT BRTHDAT_DTR BRTHDAT_DTS SEX SEX_C 
+                                 RACE_NOREPORT RACE_ETHNIC RACE_WHITE RACE_BLACK RACE_ASIA RACE_HAWISL RACE_INDALSK RACE_OTHER RACEOTH
+                                 ETHNIC ETHNIC_C
+                                 SITECOUNTRY DOV VISITINDEX VISITMNEMONIC FORMDATAID
+	 where=(armname= 'Pain_Stim_Arm_5'));
+			ASTUDYID='PSTM';
+			STUDYID='OLX.AVAIL.' || "PSTM";
+			SRC_USUBJID='OLX.AVAIL.' || "PSTM" || '.' || SUBJECTNUMBERSTR;
+			USUBJID='OLX.AVAIL.' || "PSTM" || '.' || SUBJECTNUMBERSTR;
+			SUBJID=SUBJECTNUMBERSTR;
+			SITEID=put(SITE_NUMBER, 8.);
+     
+     select(upcase(sex_R));
+          when('FEMALE') sex='F';
+          when('MALE') sex='M';
+          when('UNKNOWN') sex='U';
+          when('UNDIFFERENTIATED') sex='UN';
+          otherwise sex=' ';
+     end;
+
+     MULTI_RACE_N1 = sum(RACE_ETHNIC='Checked', RACE_BLACK='Checked', RACE_ASIA='Checked', RACE_HAWISL='Checked', RACE_INDALSK='Checked', RACE_OTHER='Checked');
+     MULTI_RACE_N2 = sum(RACE_WHITE='Checked', RACE_BLACK='Checked', RACE_ASIA='Checked', RACE_HAWISL='Checked', RACE_INDALSK='Checked', RACE_OTHER ='Checked');
+	 MULTI_RACE_N3 = sum(RACE_ETHNIC='Checked',RACE_WHITE='Checked');
+
+
+
+     if MULTI_RACE_N3 >1  then 
+          do;
+               RACE='WHITE';
+               SRC_RACE='MULTIPLE';
+          end;
+     if MULTI_RACE_N1 >1 or MULTI_RACE_N2 >1 then 
+          do;
+               RACE='MULTIPLE';
+               SRC_RACE='MULTIPLE';
+          end;
+     IF NOT (MULTI_RACE_N1 >1 AND MULTI_RACE_N2 >1 AND MULTI_RACE_N3 >1) THEN 
+          do;
+               if RACE_ETHNIC='Checked'  then 
+                    do;
+                         Race='WHITE';
+                         SRC_RACE=vlabel(RACE_ETHNIC);
+                    end;
+               else if RACE_WHITE='Checked' then 
+                    do;
+                         Race='WHITE';
+                         SRC_RACE=vlabel(RACE_WHITE);
+                    end;
+               else if RACE_BLACK='Checked' then 
+                    do;
+                         Race='BLACK OR AFRICAN AMERICAN';
+                         SRC_RACE=vlabel(RACE_BLACK);
+                    end;
+               else if RACE_ASIA='Checked' then 
+                    do;
+                         Race='ASIAN';
+                         SRC_RACE=vlabel(RACE_ASIA);
+                    end;
+               else if RACE_HAWISL='Checked' then 
+                    do;
+                         Race='NATIVE HAWAIIAN OR OTHER PACIFIC ISLANDER' ;
+                         SRC_RACE="Native Hawaiian or other Pacific Islander";
+                    end;
+               else if RACE_INDALSK='Checked' then 
+                    do;
+                         race='AMERICAN INDIAN OR ALASKA NATIVE';
+                         SRC_RACE=compress(vlabel(RACE_INDALSK),':');
+                    end;
+               else if RACE_OTHER ='Checked' then 
+                    do;
+                         Race='OTHER';
+                         SRC_RACE=vlabel(RACE_OTHER);
+                    end;
+               else if RACE_NOREPORT='Checked' then 
+                    do;
+                         race='NOT REPORTED';
+                         SRC_RACE=vlabel(RACE_NOREPORT);
+                    end;
+               else 
+                    do;
+                         race=' ';
+                         SRC_RACE=" ";
+                    end;
+          end;
+		  	keep &adslvarlist. subjectnumberstr AGE_C BRTHDAT_DTR;
+run;
+
+%MDTR2DTC_DT_ymd(StudyStartData=StudyStartDate,StudyStartDate=X_RFSTDT,
+             InputData=dm1, outputdata=dm2,InputDTR=BRTHDAT_DTR,
+             OutputDAT=X_BRTHDAT, OutputDT=X_BRTHDT, OutputDTC=BRTHDTC,FLGNAME=BRTHDTF,
+             DATEBEFOREStudyStart=Y);
+
+
+
+
+proc sort data=dm2; 
+     by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr; 
+run;
+
+proc sort data=CA; 
+     by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr; 
+run;
+
+data dm4;
+     merge dm2 CA;
+     by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr; 
+run;
+
+proc sort data=dm4; 
+     by subjectnumberstr; 
+run ;
+ 
+proc sort data=dm_implant;
+     by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr; 
+run ;
+
+/*MERGE DEMOG dm22 proc(CRDMPROC/SNMPROC)CA_4*/
+data dm5;
+     merge dm4(drop=RFXSTDTC  TRTSDT  TRTSDTF  X_RFXSTDAT) dm_implant;
+     by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr; 
+run;
+
+/***********************************************************************************************************
+Step 5. Exit 
+************************************************************************************************************/
+data dm6;
+     set  specslib.adslshell(where=(astudyid^=' '))  
+          SRCOLX.RD_EXIT(DROP=SITEID sitename where=(armname= 'Pain_Stim_Arm_5'));
+
+ 	ASTUDYID='PSTM';
+	STUDYID='OLX.AVAIL.' || "PSTM";
+	SRC_USUBJID='OLX.AVAIL.' || "PSTM" || '.' || SUBJECTNUMBERSTR;
+	USUBJID='OLX.AVAIL.' || "PSTM" || '.' || SUBJECTNUMBERSTR;
+	SUBJID=SUBJECTNUMBERSTR;
+	SITEID=put(SITE_NUMBER, 8.);
+     X_RFPENDT=exdate;
+
+/*	 LSTCTDT=INPUT(EXPTCT_DTR,YYMMDD10.);*/
+
+/*     X_FORMID_XEN=X_FORMID_EN;*/
+/*     X_FORMID_PEN=X_FORMID_EN;*/
+     
+     if not missing(EXDTDTH2_DTR) then 
+          do;
+/*               X_FORMID_DTH=X_FORMID_EN;*/
+               DTHFL = 'Y';
+          end; 
+     else 
+          do;
+               DTHFL = ' ';
+/*               X_FORMID_DTH=' ';*/
+          end;
+	keep ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr X_RFPENDT EXREAS EXDTDTH2_DTR EXDATE_DTR DTHFL EXPTCT_DTR;
+run;
+
+%MDTR2DTC_DT_ymd(StudyStartData=StudyStartDate,StudyStartDate=X_RFSTDT,
+             InputData=dm6, outputdata=dm7,InputDTR=EXDTDTH2_DTR,
+             OutputDAT=X_DTHDAT, OutputDT=X_DTHDT, OutputDTC=DTHDTC,FLGNAME=DTHDTF);
+
+%MDTR2DTC_DT_ymd(StudyStartData=StudyStartDate,StudyStartDate=X_RFSTDT,
+             InputData=dm7, outputdata=dm81,InputDTR=exdate_DTR,
+             OutputDAT=exdate_DAT, OutputDT=exdate_DT, OutputDTC=exdate_DTC,FLGNAME=DCSDTF);
+
+%MDTR2DTC_DT_ymd(StudyStartData=StudyStartDate,StudyStartDate=X_RFSTDT,
+             InputData=dm81, outputdata=dm8,InputDTR=EXPTCT_DTR,
+             OutputDAT=LSTCTDAT, OutputDT=LSTCTDT, OutputDTC=LSTCTDTC,FLGNAME=LSTCTDTF);
+
+data dm9;
+     SET dm8;
+     if X_DTHDAT=' ' or index(X_DTHDAT,'UNK') then 
+          do;/*if death date missing or partial, use exit date*/
+               RFENDTC=exdate_DTC;
+               X_RFENDAT=exdate_DAT;
+               X_RFENDT=exdate_DT;
+          end;
+     else 
+          do;/*both full, or partial, or exit missing*/
+               %MEarlierof2Dates(dtc1=DTHDTC,dat1=X_DTHDAT,dt1=X_DTHDT,FLG1=DTHDTF,
+                                dtc2=exdate_DTC,dat2=exdate_DAT,dt2=exdate_DT,FLG2=DCSDTF,
+                                dtc=RFENDTC,dat=X_RFENDAT,dt=X_RFENDT,FLG=TRTEDTF);
+          end;
+
+     RFPENDTC=RFENDTC;
+     X_RFPENDAT=X_RFENDAT;
+     X_RFPENDT=X_RFENDT;
+run;
+
+proc sort data=dm9;
+     by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr ; 
+run ;
+
+proc sort data=Consent2;
+     by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr; 
+run ;
+/*MERGE ELIG EXIT*/
+data dm10;
+     merge dm5 (drop=X_DTHDAT  DTHDTC RFICDTC RFICDTF DTHDTF  DCSDTF  X_RFICDAT DTHFL DCSDTF  TRTEDTF  LSTCTDT LSTCTDTF LSTCTDAT LSTCTDTC)
+           dm9
+           Consent2(in=a where =(X_RFICDAT^=' '));
+     by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID subjectnumberstr;
+	 
+
+     /* in OLX PSTM, no data is collected for each component manufacturers, in this case Medtronic is assumed */
+     ARMCD="PSTM";
+     ARM="PAIN STIMULATION";
+
+     if X_RFXSTDT = . then
+          do;
+               ACTARMCD="NOTTRT";
+               ACTARM="NOT TREATED";
+          end;
+     else
+          do;
+               ACTARMCD=ARMCD;
+               ACTARM=ARM;
+          end;
+run;
+
+
+/***********************************************************************************************************
+Step 6. get last visit from CRF forms 
+************************************************************************************************************/
+data allvisits;
+	set SRCOLX.rd_Condition_Assignment(keep=armname subjectnumberstr dov where=(armname= 'Pain_Stim_Arm_5' and dov^=.) in=e)/*gen enrollment*/
+	Srcolx.RD_Demographics  (keep=armname subjectnumberstr dov where=(armname= 'Pain_Stim_Arm_5' and dov^=.) in=gb)/*gen baseline*/
+	Srcolx.Rd_payer_information(keep=armname subjectnumberstr dov where=(armname= 'Pain_Stim_Arm_5' and dov^=.) in=pb)/*pstm baseline*/
+	Srcolx.Rd_sys_mod_pstm(keep=armname subjectnumberstr dov where=(armname= 'Pain_Stim_Arm_5' and dov^=.) in=sm)/*pstm sm*/
+
+	Srcolx.Rd_Procedure_PSTM (keep=armname subjectnumberstr   PRSTMDAT_PSTM_DTR  PRDEL_PSTM_C  where=(armname= 'Pain_Stim_Arm_5' and PRDEL_PSTM_C   ne "Y" and PRSTMDAT_PSTM_DTR^=' ' ))/*stim imp date*/
+	srcolx.RD_REPEAT1_PR_PSTM(keep=armname subjectnumberstr   PRLDIMPDAT_PSTM_DTR PRDELR1_PSTM_C where=(armname= 'Pain_Stim_Arm_5' and PRDELR1_PSTM_C ne "Y" and PRLDIMPDAT_PSTM_DTR^=' ' ))/*ld imp date*/
+	srcolx.RD_REPEAT2_PR_PSTM(keep=armname subjectnumberstr   PREXTDT_PSTM_DTR   PRDEL2_PSTM_C  where=(armname= 'Pain_Stim_Arm_5' and PRDEL2_PSTM_C  ne "Y" and PREXTDT_PSTM_DTR ^=' ' ))/*adaptor imp date*/
+
+	srcolx.Rd_follow_up_pstm(keep=armname subjectnumberstr FUDATE_PSTM_dtr FUMV_PSTM_C where=(armname= 'Pain_Stim_Arm_5' and FUMV_PSTM_C ^='Y' and FUDATE_PSTM_dtr^=' '))/*fup date*/
+	srcolx.Rd_events_pstm (keep=armname subjectnumberstr AEAWDAT_PSTM_DTR where=(armname= 'Pain_Stim_Arm_5' and AEAWDAT_PSTM_DTR^=' ' ))/*fup date*/;
+
+	FORMAT visitdate YYMMDD10.;
+
+	if dov^=. then do;
+		if e then do;visitdate=datepart(dov);cat='GENENRDT';END;
+		else if gb then do; visitdate=datepart(dov);CAT='GENBLDT';END;
+		else if pb then do; visitdate=datepart(dov);cat='PSTMBLDT';END;
+		else if sm then do; visitdate=datepart(dov);cat='SMDT';END;
+	end;
+
+	if PRSTMDAT_PSTM_DTR^=' ' then do;  visitdate=input(PRSTMDAT_PSTM_DTR,yymmdd10.);cat='STIMDT';END;
+	if PRLDIMPDAT_PSTM_DTR^=' ' then do;  visitdate=input(PRLDIMPDAT_PSTM_DTR,yymmdd10.);cat='LDDT';END;
+	if PREXTDT_PSTM_DTR^=' ' then do;  visitdate=input(PREXTDT_PSTM_DTR,yymmdd10.);cat='EXDT';END;
+
+	if FUDATE_PSTM_dtr^=' ' then do;  visitdate=input(FUDATE_PSTM_dtr,yymmdd10.);cat='FUDT';END;
+	if AEAWDAT_PSTM_DTR^=' ' then do;  visitdate=input(AEAWDAT_PSTM_DTR,yymmdd10.);cat='AEAWDT';END;
+run;
+
+proc sort data=allvisits out=allvisitssrt;
+	by subjectnumberstr cat;
+run;
+data allvisitssrt;
+set allvisitssrt;
+by subjectnumberstr cat;
+if last.cat then sfx=1;
+else sfx+1;
+run;
+
+proc sort data=allvisitssrt out=allvisitssrt;
+	by subjectnumberstr sfx;
+run;
+
+proc transpose data=allvisitssrt out=allvisitstrns(drop=_name_  );
+	by subjectnumberstr sfx;
+	id cat;
+	var visitdate;
+run;
+
+proc sql;
+create table maxdates as
+select distinct SUBJECTNUMBERSTR,max(GENBLDT) as GENBLDT format=yymmdd10.,max(GENENRDT) as GENENRDT format=yymmdd10.,max(LDDT) as LDDT format=yymmdd10.,
+       max(STIMDT) as STIMDT format=yymmdd10.,max(AEAWDT) as AEAWDT format=yymmdd10.,max(PSTMBLDT) as PSTMBLDT format=yymmdd10.,
+	   max(FUDT) as FUDT format=yymmdd10.,max(EXDT) as EXDT format=yymmdd10.,max(SMDT) as SMDT format=yymmdd10.
+from allvisitstrns
+group by 1;
+
+create table maxdate as 
+select distinct SUBJECTNUMBERSTR, GENBLDT, GENENRDT, LDDT, STIMDT, AEAWDT, PSTMBLDT, FUDT, EXDT, SMDT, 
+max(GENBLDT, GENENRDT, LDDT, STIMDT, AEAWDT, PSTMBLDT, FUDT, EXDT, SMDT) as LSTSVDT format=yymmdd10.
+from maxdates 
+order by 1;
+quit;
+
+proc sort data=dm10;by SUBJECTNUMBERSTR;run;
+data dm10_2;
+merge dm10(drop=GENBLDT GENENRDT LDDT STIMDT AEAWDT PSTMBLDT FUDT EXDT SMDT LSTSVDT) maxdate;
+by SUBJECTNUMBERSTR;
+run;
+
+
+
+/***********************************************************************************************************
+Step 7. final calculation and assignments 
+************************************************************************************************************/
+data dm11;
+     set  specslib.adslshell(where=(astudyid^=' '))
+          dm10_2;
+
+     /*get trt end date*/
+     if upcase(EXREAS) = 'ALL ENROLLED MEDTRONIC PRODUCTS ARE INACTIVE' then 
+          do;/*use exit date*/
+               RFXENDTC=RFPENDTC;
+               X_RFXENDAT=X_RFPENDAT;
+               X_RFXENDT=X_RFPENDT;
+          end; 
+     else if upcase(EXREAS) = 'PATIENT DEATH' then 
+          do;/*use death date*/
+               RFXENDTC=DTHDTC;
+               X_RFXENDAT=X_DTHDAT;
+               X_RFXENDT=X_DTHDT;
+          end;
+     else 
+          do;
+               RFXENDTC=' ' ;
+               X_RFXENDAT=' ';
+               X_RFXENDT=.;
+          end;
+     /*get age*/
+     if X_RFICDT^=. and X_BRTHDT^=. then 
+          AGE = ((X_RFICDT) - (X_BRTHDT)) / 365.25 ;
+     else if (X_RFICDT=. or X_BRTHDT=.) and AGE_C ne "" then 
+          age = INPUT(AGE_C,??best.);
+     else 
+          age=.;
+     AGEU='YEARS';
+run;
+
+proc sql;
+     create table dm12 as
+     select distinct in1.*, in2.OCPTID_TFR
+     from dm11 as in1 left join SRCOLX.RD_PATIENT_TRANSFER as in2
+     on in1.SUBJECTNUMBERSTR = in2.SUBJECTNUMBERSTR;
+quit;
+
+data dm13;
+     set dm12;
+	 where RFICDTC^=' ' ;
+     X_TXSUBJID = strip(OCPTID_TFR);
+     drop OCPTID_TFR;
+	 BRTHDT=X_BRTHDT;
+	 RFICDT=X_RFICDT;
+	 ENRLDT=X_RFICDT;
+	 TRTSDT=X_RFXSTDT;
+	 TRTEDT=X_RFXENDT;
+	 DTHDT=X_DTHDT;
+	 TRT01P='PAIN STIMULATION';
+	 TRT01PN=1;
+	 TRT01A=ACTARM;
+	 IF TRT01A="PAIN STIMULATION" THEN TRT01AN=1 ; 
+		ELSE IF TRT01A="NOT TREATED" THEN TRT01AN=0; 
+			ELSE IF TRT01A="UNPLANNED TREATMENT" THEN TRT01AN=2;
+				ELSE TRT01AN=.;
+	DCSDT=exdate_DT;
+	DSSTDTC=exdate_DTC;
+	if ACTARMCD=ARMCD then MDTDVFL='Y';else MDTDVFL='N';
+
+	if RFICDT^=. then ENRLFL='Y';else ENRLFL='N';
+
+ If DTHDT ^=. then EOSDT=DTHDT;
+ Else if DCSDT^=. THEN EOSDT= min(DCSDT,LSTCTDT);
+ Else EOSDT=LSTSVDT;
+
+ FUPDUR=( (EOSDT-RFICDT)/365.25)*12;
+ FUPDURU='Months';
+
+/*error: ACTFL cant be assigned because SITEEDT is not available.
+if Exit.EXDTDTH2_DTR not missing and Exit.EXDATE_DTR not missing and SITEEDT NOT MISSING then Y;else N*/
+
+run;
+
+
+
+
+
+%Mdupkeyout_seq(inData=dm13,outdata=dm14,dupout=dupout,sortbykeys=STUDYID SRC_USUBJID,seqvar=) ;
+
+data TARGET.ADSLOLX;
+     set SPECSLIB.ADSLshell(where=(SRC_USUBJID^=' ')) dm14;
+     keep &ADSLvarlist;
+run;
+
+
+

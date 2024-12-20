@@ -1,0 +1,671 @@
+/*~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~==~=~=~=~=~=~=~=~=~=~=~=~=~=~=~==~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+  Program :  ADSL.sas
+  Location:  
+  Study:     PSTM
+  
+  Purpose :  Create ADSL for PSTM
+ 
+
+  Inputs:          Macros
+
+                   Data   
+				   
+
+  Outputs:        
+
+
+  Caution:   
+
+
+  Revision                                        
+  History:           Version    Date            Author                  Description
+                     -------    ---------       -------------------     ----------------------------------------------
+                      Draft     22APR2014       Julia Yang              
+º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø¤º°`°º¤ø,¸¸,ø*/
+
+OPTIONS NODATE NONUMBER NOTES;
+OPTIONS MAUTOLOCDISPLAY MLOGIC MLOGICNEST  SYMBOLGEN MPRINT MPRINTNEST MCOMPILENOTE=ALL MINDELIMITER=',' MRECALL SERROR MERROR mstored; 
+OPTIONS DATASTMTCHK=ALLKEYWORDS SPOOL MSGLEVEL=I SOURCE SOURCE2 MERGENOBY=WARN ;
+proc printto;run;
+
+
+
+/*%MimportSpecs(inpathfilename=%bquote(Z:\PSTM\Documents\ADaM\adsl.xlsx), tabname=ADSL);*/
+/**/
+/*%MCreateShell(mdataset=specslib.adsl);*/
+/**/
+%MdomainVarlist(domain=adsl);
+/*keep keep &adslvarlist.;*/
+
+
+/***********************************************************************************************************
+Step OC 1. Consent and demog
+************************************************************************************************************/
+DATA adsl_INEX;
+	SET specslib.adslshell(where=(astudyid^=' '))
+		srcispr.INEX (IN=A);
+	IF A;
+	ASTUDYID='PSTM';
+	STUDYID="NGOPA.ISPR.PSTM";
+	SRC_USUBJID="NGOPA.ISPR.PSTM." || PT;
+	USUBJID="NGOPA.ISPR.PSTM." || PT;
+	SUBJID=PT;
+	SITEID = invsite;
+
+
+
+	%MDate_ISPR(indata=srcispr.INEX, indate=CONSENT_DT,
+		  DTC=RFICDTC, X_DAT=X_RFICDAT, X_DT=X_RFICDT);
+	%MDate_ISPR(indata=srcispr.INEX, indate=BIRTH_DT,
+		  DTC=BRTHDTC, X_DAT=X_BRTHDAT, X_DT=X_BRTHDT);
+
+keep 	ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID
+	 RFICDTC X_RFICDAT X_RFICDT
+	 BRTHDTC X_BRTHDAT X_BRTHDT;
+RUN;
+
+proc sort data=adsl_inex;by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID;run;
+/***********************************************************************************************************
+Step OC 2.   Study start date, earliest of implants
+************************************************************************************************************/
+
+
+
+/***********************************************************************************************************
+1. new(proc and sm proc) stim imp/sm  SYST
+new NEUROSTIMULATOR DEVICE INFORMATION & IMPLANT TECHNIQUE
+THERAPY STATUS
+PROGRAMMING STATUS
+************************************************************************************************************/
+/*proc freq data=SRCISPR.SYST ;*/
+/*tables cpevent*dcmname*dcmsubnm/list out=syst;*/
+/*run;*/
+data stim_new;
+set srcispr.SYST;
+FORMAT visitdate YYMMDD10. cat $8.;
+keep pt dcmdate visitdate invsite cat;
+/*imp:*/
+if CPEVENT='IMPLANT' and DCMNAME='SYS_IMPL_STIM' and DCMSUBNM='SYSIMST' then do;
+	if dcmdate^=' ' then do;
+		visitdate = input(dcmdate,yymmdd8.);cat='STIMDT';
+		output;
+	end;
+end;
+/*sm:		*/
+if CPEVENT='MODIFICATION' and DCMNAME='SYS_IMPL_STIM' and DCMSUBNM='STMMOD' then do;
+	if dcmdate^=' ' then do;
+		visitdate = input(dcmdate,yymmdd8.);cat='SMDT';
+		output;
+	end;
+end;	
+run;
+
+
+/***********************************************************************************************************
+2.new (proc and sm proc) lead: new leads from proc/sm proc; new leads from supplemental lead form
+************************************************************************************************************/
+/*proc freq data=SRCISPR.LEAD ;*/
+/*tables cpevent*dcmname*dcmsubnm/list out=LEAD;*/
+/*run;*/
+/*CPEVENT	DCMNAME	DCMSUBNM		*/
+/*IMPLANT	LEAD_INFO	LEAD-- suppLeads, dcmdate*/
+/*IMPLANT	LEAD_INFO	SYSI-- newLeads, implant date collected*/
+/*MODIFICATION	LEAD_INFO--	LEADMOD sm new leads, dcmdate*/
+data lead_new;
+set srcispr.LEAD;
+keep pt dcmdate IMPLANT_DT1 IMPLANT_DT2 visitdate cat invsite;
+FORMAT visitdate YYMMDD10. cat $8.;
+/*imp:*/
+if CPEVENT='IMPLANT' and	DCMNAME='LEAD_INFO' and	DCMSUBNM='SYSI' then do;
+	cat='LDDT';
+	if IMPLANT_DT1^= . then do;
+		visitdate = datepart(IMPLANT_DT1);
+		output;
+	end;
+	if IMPLANT_DT2^= . then do;
+		visitdate = datepart(IMPLANT_DT2);
+		output;
+	end;
+end;
+ELSE IF CPEVENT='IMPLANT'	AND DCMNAME='LEAD_INFO'	and	DCMSUBNM='LEAD' THEN DO;
+	cat='LDDT';
+	if dcmdate^=' ' then do;
+		visitdate = input(dcmdate,yymmdd8.);
+		output;
+	end;
+END;
+/*sm:		*/
+else if CPEVENT='MODIFICATION' and	DCMNAME='LEAD_INFO' and	DCMSUBNM ='LEADMOD' then do;
+	cat='SMDT';
+	if dcmdate^=' ' then do;
+		visitdate = input(dcmdate,yymmdd8.);
+		output;
+	end;
+end;
+run;
+
+/***********************************************************************************************************
+3.new (proc and sm proc) SRCISPR.SYEX extension  
+
+************************************************************************************************************/
+/*proc freq data=SRCISPR.SYEX ;*/
+/*tables cpevent*dcmname*dcmsubnm/list out=SYEX;*/
+/*run;*/
+	
+
+data ext_new;
+set srcispr.SYEX;
+keep pt dcmdate R_IMPLANT_DT L_IMPLANT_DT visitdate cat invsite;
+visitdate = input(dcmdate,yymmdd8.);
+FORMAT visitdate YYMMDD10. cat $8.;
+/*imp:*/
+if CPEVENT='IMPLANT' and	DCMNAME='SYS_IMPL_EXT' and	DCMSUBNM='SYSIMEX' then do;
+	cat='EXDT';
+	if L_IMPLANT_DT^= ' ' then do;
+		visitdate = input(L_IMPLANT_DT,yymmdd8.);
+		output;
+	end;
+	if R_IMPLANT_DT^= ' ' then do;
+		visitdate = input(R_IMPLANT_DT,yymmdd8.);
+		output;
+	end;
+end;
+/*sm:		*/
+else if CPEVENT='MODIFICATION' and	DCMNAME='SYS_IMPL_EXT' and	DCMSUBNM='EXTMOD'	then do;
+	cat='SMDT';
+	if dcmdate^=' ' then do;
+		visitdate = input(dcmdate,yymmdd8.);
+		output;
+	end;
+end;
+run;
+
+
+/****************************************************************************************/
+/*set ALL THE IMPLANTED COMPONENTS TOGETHER AND IDENTIFY THE FIRST IMPLANT COMPONENT*/
+/****************************************************************************************/
+data allimpdates;
+	set stim_new lead_new ext_new;
+	keep pt dcmdate visitdate invsite cat;
+run;
+proc sort data=allimpdates out=allimpdates; by pt visitdate; run;
+data EarlyImpDate; 	
+	set allimpdates; 	
+	by pt visitdate;
+	if first.pt; 	
+	keep  pt dcmdate visitdate invsite cat;
+run;
+
+
+
+data ADSL_imp;
+	set specslib.adslshell(where=(astudyid^=' '))
+		EarlyImpDate(in = a);
+
+	ASTUDYID='PSTM';
+	STUDYID="NGOPA.ISPR.PSTM";
+	SRC_USUBJID="NGOPA.ISPR.PSTM." || PT;
+	USUBJID="NGOPA.ISPR.PSTM." || PT;
+	SUBJID=PT;
+	SITEID = invsite;
+
+	%MDate_ISPR(indata=EarlyImpDate, indate=visitdate,
+	  DTC=RFSTDTC, X_DAT=X_RFSTDAT, X_DT=X_RFSTDT,numdatetime=DATE);
+	%MDATE_ISPR(INDATA=EARLYIMPDATE, INDATE=visitdate,
+	  DTC=RFXSTDTC, X_DAT=X_RFXSTDAT, X_DT=X_RFXSTDT,NUMDATETIME=DATE);
+
+
+	  KEEP  pt	ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID
+			RFSTDTC X_RFSTDAT X_RFSTDT
+			RFXSTDTC X_RFXSTDAT X_RFXSTDT ;
+run;
+
+proc sort data=adsl_imp;by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID;run;
+/***********************************************************************************************************
+Step OC 3. exit form 
+************************************************************************************************************/
+%macro Other_Var(sdtmvar=, var1=, var2=);
+			length s_var $1000.;
+			s_var		=	strip(&var1);
+
+			if upcase(strip(&var1)) = "OTHER, SPECIFY" and &var2 ^= " " then 
+				s_var		=	"Other, "|| strip(&var2);
+			else if upcase(strip(&var1)) = "OTHER, SPECIFY" and &var2 = " " then
+				s_var		=	"Other, ";
+			&sdtmvar = strip(s_var);
+
+%mend Other_Var;
+/*get end of study date*/
+data ADSL_disc1;
+	set specslib.adslshell(where=(astudyid^=' ')) 
+		srcispr.DISC(in = a);
+
+	SUBJID = strip(PT);
+	SRC_SUBJID = strip(PT);
+
+	length RFENDTC1 $19. X_RFENDAT1 $200. X_RFENDT1 8.;
+	format RFENDTC1 $19. X_RFENDAT1 $200. X_RFENDT1 yymmdd10.;
+
+	%MDate_ISPR(indata=srcispr.DISC, indate=CONTACT_DT,
+	  DTC=LSTCTDTC, X_DAT=LSTCTDAT, X_DT=LSTCTDT);
+
+	%MDate_ISPR(indata=srcispr.DISC, indate=DCMDATE,
+	  DTC=RFENDTC1, X_DAT=X_RFENDAT1, X_DT=X_RFENDT1);
+
+	length RFENDTC2 $19. X_RFENDAT2 $200. X_RFENDT2 8.;
+	format RFENDTC2 $19. X_RFENDAT2 $200. X_RFENDT2 yymmdd10.;
+
+
+	%MDate_ISPR(indata=srcispr.DISC, indate=DEATH_DT,
+	  DTC=RFENDTC2, X_DAT=X_RFENDAT2, X_DT=X_RFENDT2); 
+
+/*	  else do; RFENDTC2 = ""; X_RFENDAT2 = ""; X_RFENDT2 = .; end;*/
+
+	  %MEarlierof2Dates(dtc1=RFENDTC1,dat1=X_RFENDAT1,dt1=X_RFENDT1,
+						dtc2=RFENDTC2,dat2=X_RFENDAT2,dt2=X_RFENDT2,
+						dtc=RFENDTC,dat=X_RFENDAT,dt=X_RFENDT,
+						formid=,formid1=,formid2=);
+
+	RFPENDTC		= RFENDTC;
+	X_RFPENDAT		= X_RFENDAT;
+	X_RFPENDT 		= X_RFENDT;
+
+	ASTUDYID='PSTM';
+	STUDYID="NGOPA.ISPR.PSTM";
+	SRC_USUBJID="NGOPA.ISPR.PSTM." || PT;
+	USUBJID="NGOPA.ISPR.PSTM." || PT;
+	SUBJID=PT;
+	SITEID = invsite;
+/*	if  DISCONTINUATION ^= "Death" THEN DO;*/
+		DCSDT=X_RFENDT1;
+		DSSTDTC=RFENDTC1;
+/*	END;*/
+
+	if strip(DISCONTINUATION) ^= 'Other, Specify' then do;
+		SRC_DSTERM =strip(DISCONTINUATION);
+	end;
+
+	else do;
+		%Other_Var(sdtmvar= SRC_DSTERM , var1= DISCONTINUATION, var2= OTH_DISCONTINUE_SP);
+	end;
+			
+
+	KEEP ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID
+		  RFENDTC X_RFENDAT X_RFENDT RFPENDTC X_RFPENDAT X_RFPENDT DSSTDTC DCSDT LSTCTDAT LSTCTDT LSTCTDTC SRC_DSTERM
+RFENDTC1 X_RFENDAT1 X_RFENDT1 RFENDTC2 X_RFENDAT2 X_RFENDT2; 
+RUN;
+
+/*get therapy stop date*/
+Data ADSL_disc2;
+	set specslib.adslshell(where=(astudyid^=' ')) 
+		srcispr.DISC (in = b);
+
+	ASTUDYID='PSTM';
+	STUDYID="NGOPA.ISPR.PSTM";
+	SRC_USUBJID="NGOPA.ISPR.PSTM." || PT;
+	USUBJID="NGOPA.ISPR.PSTM." || PT;
+	SUBJID=PT;
+	SITEID = invsite;
+
+	
+
+	if strip(DISCONTINUATION) in ("Primary device explanted/not replaced", "Therapy abandoned for greater than 6 months") then 
+		do;
+			%MDate_ISPR(indata=srcispr.DISC, indate=DCMDATE,
+	  			DTC=RFXENDTC, X_DAT=X_RFXENDAT, X_DT=X_RFXENDT);
+		end;
+	else if strip(DISCONTINUATION) = 'Death' then
+		do;
+			%MDate_ISPR(indata=srcispr.DISC, indate=DEATH_DT,
+	  			DTC=RFXENDTC, X_DAT=X_RFXENDAT, X_DT=X_RFXENDT);
+		end;
+	else
+		do;
+			RFXENDTC	=	" ";
+			X_RFXENDAT	=	" ";
+			X_RFXENDT	=	.;
+		end;
+
+
+	KEEP  ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID DISCONTINUATION
+	  	  RFXENDTC X_RFXENDAT X_RFXENDT   ;
+run;
+
+/*death date*/
+Data ADSL_disc3;
+	set specslib.adslshell(where=(astudyid^=' ')) 
+		srcispr.DISC(in = b );
+	ASTUDYID='PSTM';
+	STUDYID="NGOPA.ISPR.PSTM";
+	SRC_USUBJID="NGOPA.ISPR.PSTM." || PT;
+	USUBJID="NGOPA.ISPR.PSTM." || PT;
+	SUBJID=PT;
+	SITEID = invsite;
+
+	%MDate_ISPR(indata=srcispr.DISC, indate=DEATH_DT,
+	  DTC=DTHDTC, X_DAT=X_DTHDAT, X_DT=X_DTHDT);
+
+/*	if  DISCONTINUATION = "Death" then */
+	if X_DTHDT^=. then 
+		do;
+			DTHFL	= 'Y';
+		end;
+ 	else 
+		do;
+			DTHFL	= '';
+			X_FORMID_DTH	=	" ";
+		end; 
+
+	KEEP ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID
+	  DTHDTC X_DTHDAT X_DTHDT DTHFL ;
+run;
+
+PROC SORT DATA=ADSL_disc1; BY ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID; RUN;
+PROC SORT DATA=ADSL_disc2; BY ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID; RUN;
+PROC SORT DATA=ADSL_disc3; BY ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID; RUN;
+
+DATA ADSL_disc;
+	MERGE ADSL_disc1
+		  ADSL_disc2
+		  ADSL_disc3;
+	BY ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID;
+
+RUN;
+
+/***********************************************************************************************************
+Step OC 4. demographics 
+************************************************************************************************************/
+
+Data ADSL_DEMO;
+	set specslib.adslshell(where=(astudyid^=' ')) 
+		srcispr.demo(in = b );
+
+	ASTUDYID='PSTM';
+	STUDYID="NGOPA.ISPR.PSTM";
+	SRC_USUBJID="NGOPA.ISPR.PSTM." || PT;
+	USUBJID="NGOPA.ISPR.PSTM." || PT;
+	SUBJID=PT;
+	SITEID = invsite;
+
+	SEX = SEX;
+	SRC_SEX  = sex;
+	SRCCD_SEX = strip(PUT(SEX_DVN, BEST.));
+
+	%MDate_ISPR(indata=srcispr.DEMO, indate=DCMDATE,
+	 			DTC=DMDTC, X_DAT=X_DMDAT, X_DT=X_DMDT);
+
+	VISITNUM	=	ACTEVENT;
+	VISIT	=	CPEVENT;
+	MULTI_RACE_N = sum(WHITE_X='X', BLACK_AFRICAN_X='X', ASIAN_X='X', HAWAIIAN_PACIFIC_X='X', 
+			AMERICAN_INDIAN_X='X', RACE_OTHER_X^=' ');
+	IF MULTI_RACE_N >1 then do;
+			RACE		=	 'MULTIPLE';
+			SRC_RACE	=	 'MULTIPLE';
+		end;
+	else do;
+			 if WHITE_X='X' 	then do;		Race 	='WHITE';
+												SRC_RACE='White'; end;
+		else if BLACK_AFRICAN_X='X' then do;	Race 	='BLACK OR AFRICAN AMERICAN';
+												SRC_RACE='Black or African American'; end;
+		else if ASIAN_X='X'  	then do;		Race 	='ASIAN';
+												SRC_RACE='Asian'; end;
+		else if HAWAIIAN_PACIFIC_X='X' then do; Race 	='NATIVE HAWAIIAN OR OTHER PACIFIC ISLANDER';
+												SRC_RACE="Native Hawaiian or Other Pacific Islander"; end;
+		else if AMERICAN_INDIAN_X='X' then do;  race 	='AMERICAN INDIAN OR ALASKA NATIVE';
+												SRC_RACE='American Indian or Alaska Native'; end;
+		else if RACE_OTHER_X^=' ' then do;		Race 	='OTHER';
+												SRC_RACE='Other'; end;
+		else if NOT_COLLECTED_X='X' then do;	race	='NOT REPORTED';
+												SRC_RACE='Not Reported'; end;
+		else if SUBJECT_REFUSED_X='X' then do;	RACE = 'PATIENT REFUSED';
+												SRC_RACE='Patient Refused'; end;
+		else do;								race	=' ';
+												SRC_RACE=' ';end;
+	end;
+	keep ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID
+		 
+		 SEX SRC_SEX SRCCD_SEX 
+		 RACE SRC_RACE 
+		 DMDTC X_DMDT X_DMDAT
+		 ;
+RUN;
+proc sort data=adsl_demo;by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID;run;
+
+/***********************************************************************************************************
+Step OC 5. visit date 
+************************************************************************************************************/
+data allvisits1(where=(visitdate^=.) keep=pt dcmdate visitdate  invsite cat);
+	set srcispr.INEX(keep=pt dcmdate  invsite where=(dcmdate^=' ') in=e)/*gen enrollment*/
+	srcispr.Demo(keep=pt dcmdate  invsite where=(dcmdate^=' ') in=gb)/*gen baseline*/
+	srcispr.FLUP(keep=pt dcmdate  invsite where=(dcmdate^=' ') in=fup)/*fup date*/
+	srcispr.ae (keep=pt dcmdate  invsite where=(dcmdate^=' ') in=ae)/*ae date*/;
+
+	FORMAT visitdate YYMMDD10. cat $8.;
+
+	if dcmdate^=' ' then do;
+		if e then do;visitdate = input(dcmdate,yymmdd8.);cat='GENENRDT';output;END;
+		else if gb then do; visitdate = input(dcmdate,yymmdd8.);CAT='GENBLDT';output;END;
+		else if fup then do; visitdate = input(dcmdate,yymmdd8.);cat='FUDT';output;END;
+		else if ae then do; visitdate = input(dcmdate,yymmdd8.);cat='AEAWDT';output;END;
+	end;
+run;
+
+
+/***********************************************************************************************************
+4.config section from stim /lead/ ext/ adp
+************************************************************************************************************/
+/*proc freq data=SRCISPR.SYIC ;*/
+/*tables cpevent*dcmname*dcmsubnm/list out=syic;*/
+/*run;*/
+/**/
+/*CPEVENT	DCMNAME	DCMSUBNM		*/
+/*IMPLANT	SYS_IMPL_CFG	SYSIMCFG*/
+/*MODIFICATION	SYS_IMPL_CFG	EXTCFG*/
+/*MODIFICATION	SYS_IMPL_CFG	LEADCFG*/
+/*MODIFICATION	SYS_IMPL_CFG	STIMCFG*/
+/*data all_config;*/
+/*set SRCISPR.SYIC;*/
+/*keep pt dcmdate;*/
+/*if dcmdate^=' ' then do;*/
+/*	visitdate = input(dcmdate,yymmdd8.);*/
+/*	output;*/
+/*end;*/
+/*run;*/
+
+/***********************************************************************************************************
+5.old stim sm SMST: 
+PAYER INFORMATION,
+old NEUROSTIMULATOR/ADAPTOR MODIFICATION;
+EXPLANTED NEUROSTIMULATOR/ADAPTOR DEVICE DISPOSITION
+NON-REPLACEMENT QUESTIONS
+************************************************************************************************************/
+/*proc freq data=SRCISPR.SMST ;*/
+/*tables cpevent*dcmname*dcmsubnm/list out=smst;*/
+/*run;*/
+/*CPEVENT	DCMNAME	DCMSUBNM		*/
+/*MODIFICATION	SYS_MOD_STIM	SYSMDST*/
+data stim_sm_old;
+set SRCISPR.SMST;
+keep pt dcmdate visitdate invsite cat;
+FORMAT visitdate YYMMDD10. cat $8.;
+if dcmdate^=' ' then do;
+	cat='SMDT';
+	visitdate = input(dcmdate,yymmdd8.);
+	output;
+end;
+run;
+
+
+/***********************************************************************************************************
+6.old SRCISPR.SMLD lead, 
+lead MODIFICATION
+EXPLANTED lead DEVICE DISPOSITION
+NON-REPLACEMENT QUESTIONS
+************************************************************************************************************/
+/*proc freq data=SRCISPR.SMEX ;*/
+/*tables cpevent*dcmname*dcmsubnm/list out=SMEX;*/
+/*run;*/
+data lead_sm_old;
+set SRCISPR.SMLD;
+keep pt dcmdate visitdate invsite cat;
+FORMAT visitdate YYMMDD10. cat $8.;
+if dcmdate^=' ' then do;
+	cat='SMDT';
+	visitdate = input(dcmdate,yymmdd8.);
+	output;
+end;
+run;
+
+
+/***********************************************************************************************************
+7.old SRCISPR.SMEX extension, 
+EXTENSION MODIFICATION
+EXPLANTED EXTENSION DEVICE DISPOSITION
+NON-REPLACEMENT QUESTIONS
+************************************************************************************************************/
+/*proc freq data=SRCISPR.SMEX ;*/
+/*tables cpevent*dcmname*dcmsubnm/list out=SMEX;*/
+/*run;*/
+data ext_sm_old;
+set SRCISPR.SMEX;
+keep pt dcmdate visitdate invsite cat;
+FORMAT visitdate YYMMDD10. cat $8.;
+if dcmdate^=' ' then do;
+	cat='SMDT';
+	visitdate = input(dcmdate,yymmdd8.);
+	output;
+end;
+run;
+
+data allvisits;
+set stim_new lead_new ext_new
+ext_sm_old lead_sm_old stim_sm_old
+allvisits1;
+FORMAT visitdate YYMMDD10.;
+where visitdate^=.;
+run;
+
+proc sort data=allvisits nodupkeys;by INVSITE pt cat visitdate;
+
+data allvisits_cat;
+set allvisits;
+by INVSITE pt cat visitdate;
+if last.cat;
+run;
+
+proc transpose data=allvisits_cat out=allvisit(drop=_name_ );
+	by INVSITE pt;
+	id cat;
+	var visitdate;
+run;
+
+data ADSL_visits;
+	set specslib.adslshell(where=(astudyid^=' '))
+	allvisit;
+	ASTUDYID='PSTM';
+	STUDYID="NGOPA.ISPR.PSTM";
+	SRC_USUBJID="NGOPA.ISPR.PSTM." || PT;
+	USUBJID="NGOPA.ISPR.PSTM." || PT;
+	SUBJID=PT;
+	SITEID = invsite;
+	keep GENBLDT GENENRDT LDDT STIMDT AEAWDT PSTMBLDT FUDT EXDT SMDT ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID;
+run;
+PROC SQL;
+create table maxdate as 
+select distinct ASTUDYID, STUDYID, SRC_USUBJID,  USUBJID, SUBJID, SITEID, GENBLDT, GENENRDT, LDDT, STIMDT, AEAWDT, PSTMBLDT, FUDT, EXDT, SMDT, 
+max(GENBLDT, GENENRDT, LDDT, STIMDT, AEAWDT, FUDT, EXDT, SMDT) as LSTSVDT format=yymmdd10.
+from adsl_visits 
+order by 1,2,3,4,5,6;
+quit;
+
+
+
+/***********************************************************************************************************
+Step . all together
+************************************************************************************************************/
+data dmall;
+	merge ADSL_DEMO
+		  ADSL_disc
+		  ADSL_imp
+		  ADSL_inex
+		  maxdate;
+	by ASTUDYID STUDYID SRC_USUBJID  USUBJID SUBJID SITEID;
+run;
+
+
+%Mdupkeyout_seq(inData=dmALL,outdata=DMALL2,dupout=dupout,sortbykeys=STUDYID SRC_USUBJID,seqvar=) ;
+
+data dmall13;
+     set SPECSLIB.ADSLshell(where=(SRC_USUBJID^=' ')) dmall2;
+
+	if RFICDTC^=' ';
+	 BRTHDT=X_BRTHDT;
+	 RFICDT=X_RFICDT;
+	 If X_RFICDT^=.  AND X_BRTHDT ^=. THEN AGE = (X_RFICDT - X_BRTHDT) / 365.25 ;
+	 AGEU='YEARS';
+	 ENRLDT=X_RFICDT;
+	 TRTSDT=X_RFXSTDT;
+	 TRTEDT=X_RFXENDT;
+	 DTHDT=X_DTHDT;
+
+     /* in OC PSTM, no data is collected for each component manufacturers, in this case Medtronic is assumed */
+     ARMCD="PSTM";
+     ARM="PAIN STIMULATION";
+
+     if X_RFXSTDT = . then
+          do;
+               ACTARMCD="NOTTRT";
+               ACTARM="NOT TREATED";
+          end;
+     else
+          do;
+               ACTARMCD=ARMCD;
+               ACTARM=ARM;
+          end;
+
+	 TRT01P='PAIN STIMULATION';
+	 TRT01PN=1;
+	 TRT01A=ACTARM;
+	 IF TRT01A="PAIN STIMULATION" THEN TRT01AN=1 ; 
+		ELSE IF TRT01A="NOT TREATED" THEN TRT01AN=0; 
+			ELSE IF TRT01A="UNPLANNED TREATMENT" THEN TRT01AN=2;
+				ELSE TRT01AN=.;
+
+	if ACTARMCD=ARMCD then MDTDVFL='Y';else MDTDVFL='N';
+
+	if RFICDT^=. then ENRLFL='Y';else ENRLFL='N';
+
+ If DTHDT ^=. then EOSDT=DTHDT;
+ Else if DCSDT^=. THEN EOSDT= min(DCSDT,LSTCTDT);
+ Else EOSDT=LSTSVDT;
+
+ FUPDUR=( (EOSDT-RFICDT)/365.25)*12;
+ FUPDURU='Months';
+     keep &ADSLvarlist;
+run;
+
+
+%Mdupkeyout_seq(inData=dmall13,outdata=dm14,dupout=dupout,sortbykeys=STUDYID SRC_USUBJID,seqvar=) ;
+
+data TARGET.ADSLoc;
+     set SPECSLIB.ADSLshell(where=(SRC_USUBJID^=' ')) dm14;
+     keep &ADSLvarlist;
+run;
+
+
+
+
+
+
+
+
+		
+
+
+
+
+
+
+
+
+

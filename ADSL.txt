@@ -1,0 +1,37 @@
+
+
+/*create a dataset with all data in lib*/
+proc contents data=target.adslolx
+out=contentsDATA(keep=memname name type length varnum label format)
+noprint;
+run;
+quit;
+
+data renamed;
+set contentsDATA;
+length renamed $50;
+renamed="coalesce(i."||compress(name)||", o."||compress(name)||") as "||compress(name);
+run;
+
+/*merge OC and OLX*/
+/*rename oc vars*/
+proc sql noprint;
+select distinct renamed into: renamelist separated by ', '
+from renamed;
+quit;
+
+proc sql;
+create table ADSL as 
+select %unquote(&renamelist)
+from TARGET.ADSLoc as o full join TARGET.ADSLolx as i
+on O.SUBJID= i.X_TXSUBJID
+order by o.STUDYID, o.USUBJID;
+quit;
+
+data ADSL1;
+set specslib.adslshell(where=(astudyid^=' ')) ADSL;
+SRC_USUBJID=USUBJID;
+run;
+
+%Mdupkeyout_seq(inData=ADSL1,outdata=target.ADSL,dupout=dupout,sortbykeys=STUDYID USUBJID,seqvar=) ;
+
